@@ -26,6 +26,52 @@ function Export-WSLDistro {
     )
 
     begin {
+        # Progress display helper
+        function Write-ExportProgress {
+            param(
+                [Parameter(Mandatory)]
+                [long]$CurrentSize,
+                
+                [Parameter(Mandatory)]
+                [long]$TotalSize,
+                
+                [Parameter(Mandatory)]
+                [TimeSpan]$Elapsed,
+                
+                [Parameter(Mandatory)]
+                [char]$SpinnerChar
+            )
+
+            # Calculate speed
+            $speed = $CurrentSize / $Elapsed.TotalSeconds
+            $speedMBps = [math]::Round($speed/1MB, 2)
+            
+            # Calculate time remaining
+            $remainingTime = [TimeSpan]::Zero
+            if ($speed -gt 0) {
+                $remainingBytes = $TotalSize - $CurrentSize
+                $remainingTime = [TimeSpan]::FromSeconds($remainingBytes / $speed)
+            }
+            
+            # Calculate progress percentage
+            $progressPercent = [math]::Min(100, [math]::Round(($CurrentSize / $TotalSize) * 100, 1))
+            
+            # Create progress bar (50 chars wide)
+            $progressBar = "[" + ("=" * [math]::Floor($progressPercent/2)) + ">" + 
+                          (" " * [math]::Floor((100-$progressPercent)/2)) + "]"
+            
+            # Format sizes
+            $currentGB = [math]::Round($CurrentSize/1GB, 2)
+            $totalGB = [math]::Round($TotalSize/1GB, 2)
+            
+            # Build and write status line
+            $status = "`r{0} {1} {2}% | {3:N2}GB / {4:N2}GB | {5:N2} MB/s | ETA: {6:hh\:mm\:ss}" -f `
+                $SpinnerChar, $progressBar, $progressPercent, $currentGB, $totalGB, 
+                $speedMBps, $remainingTime
+            
+            Write-Host $status -NoNewline
+        }
+
         # Validate WSL is available
         if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
             throw "WSL is not installed or not in PATH. Please install WSL first."
@@ -64,9 +110,8 @@ function Export-WSLDistro {
         Write-Verbose "Starting WSL export with arguments: $($exportArgs -join ' ')"
         $exportProcess = Start-Process wsl.exe -ArgumentList $exportArgs -PassThru
 
-        # Monitor the export file size
+        # Initialize monitoring variables
         $monitoring = $true
-        $lastSize = 0
         $startTime = Get-Date
         $spinner = @('|', '/', '-', '\')
         $spinnerIndex = 0
@@ -77,34 +122,17 @@ function Export-WSLDistro {
             if (Test-Path $ExportPath) {
                 $currentSize = (Get-Item $ExportPath).Length
                 $elapsed = (Get-Date) - $startTime
-                
-                # Calculate speed and progress
+
+                # Only update progress if time has elapsed
                 if ($elapsed.TotalSeconds -gt 0) {
-                    $speed = $currentSize / $elapsed.TotalSeconds
-                    $speedMBps = [math]::Round($speed/1MB, 2)
+                    Write-ExportProgress `
+                        -CurrentSize $currentSize `
+                        -TotalSize $initialSize `
+                        -Elapsed $elapsed `
+                        -SpinnerChar $spinner[$spinnerIndex]
                     
-                    # Calculate estimated time remaining
-                    if ($speed -gt 0) {
-                        $remainingBytes = $initialSize - $currentSize
-                        $remainingSeconds = $remainingBytes / $speed
-                        $remainingTime = [TimeSpan]::FromSeconds($remainingSeconds)
-                    }
-                    
-                    # Calculate progress percentage (cap at 100%)
-                    $progressPercent = [math]::Min(100, [math]::Round(($currentSize / $initialSize) * 100, 1))
-                    
-                    # Create progress bar
-                    $progressBar = "[" + ("=" * [math]::Floor($progressPercent/2)) + ">" + (" " * [math]::Floor((100-$progressPercent)/2)) + "]"
-                    
-                    # Update spinner
                     $spinnerIndex = ($spinnerIndex + 1) % 4
-                    $currentSpinner = $spinner[$spinnerIndex]
-                    
-                    # Clear the previous line and write the new status
-                    Write-Host "`r$currentSpinner $progressBar $progressPercent% | $([math]::Round($currentSize/1GB, 2))GB / $([math]::Round($initialSize/1GB, 2))GB | $speedMBps MB/s | ETA: $($remainingTime.ToString('hh\:mm\:ss'))" -NoNewline
                 }
-                
-                $lastSize = $currentSize
             }
             
             # Check if the export process has finished
@@ -129,7 +157,7 @@ function Export-WSLDistro {
     }
 }
 
-# Export the function
+# Export the function when imported as a module
 Export-ModuleMember -Function Export-WSLDistro
 
 # Allow direct execution of this script
