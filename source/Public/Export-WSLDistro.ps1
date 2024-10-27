@@ -1,21 +1,58 @@
 function Export-WSLDistro {
-# Parameters for the WSL export
+    [CmdletBinding()]
     param(
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
         [string]$DistroName,
         
-        [Parameter(Mandatory=$true)]
+        [Parameter(Mandatory = $true)]
+        [ValidateNotNullOrEmpty()]
+        [ValidateScript({
+            if ($_ -match '^[a-zA-Z]:\\') {
+                $parent = Split-Path -Parent $_
+                if (Test-Path $parent) { return $true }
+                throw "Directory '$parent' does not exist."
+            }
+            throw "Path must be a full path (e.g., 'C:\exports\backup.vhdx')"
+        })]
         [string]$ExportPath,
         
+        [Parameter()]
         [switch]$VHD,
 
-        [Parameter(Mandatory=$false)]
+        [Parameter()]
+        [ValidateRange(1, 10000)]
         [long]$EstimatedSizeGB = 10
     )
 
     begin {
+        # Validate WSL is available
+        if (-not (Get-Command wsl.exe -ErrorAction SilentlyContinue)) {
+            throw "WSL is not installed or not in PATH. Please install WSL first."
+        }
+
+        # Validate distribution exists
+        $distros = wsl.exe --list --quiet
+        if ($distros -notmatch "^$DistroName$") {
+            $availableDistros = $distros | Where-Object { $_ -and $_.Trim() } | ForEach-Object { "- $_" }
+            throw "Distribution '$DistroName' not found. Available distributions:`n$($availableDistros -join "`n")"
+        }
+
+        # Calculate initial size
         $initialSize = $EstimatedSizeGB * 1GB
         Write-Host "Using estimated size of $EstimatedSizeGB GB"
+
+        # Create export directory if it doesn't exist
+        $exportDir = Split-Path -Parent $ExportPath
+        if (-not (Test-Path $exportDir)) {
+            Write-Verbose "Creating directory: $exportDir"
+            New-Item -ItemType Directory -Path $exportDir -Force | Out-Null
+        }
+
+        # Check if export file already exists
+        if (Test-Path $ExportPath) {
+            throw "Export file already exists: $ExportPath"
+        }
     }
 
     process {
@@ -24,6 +61,7 @@ function Export-WSLDistro {
         if ($VHD) {
             $exportArgs += "--vhd"
         }
+        Write-Verbose "Starting WSL export with arguments: $($exportArgs -join ' ')"
         $exportProcess = Start-Process wsl.exe -ArgumentList $exportArgs -PassThru
 
         # Monitor the export file size
