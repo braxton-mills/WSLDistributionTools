@@ -1,14 +1,25 @@
 # Command to export a WSL distribution to a VHDX file
 #
 # Examples:
-#   Export Ubuntu 24.04 to a VHDX file with 256GB estimated size:
-#   .\Export-WSLDistro.ps1 -DistroName Ubuntu-24.04 -ExportPath E:\exports\ubuntu_test.vhdx -VHD -EstimatedSizeGB 256 -Verbose
+#   Export Ubuntu 24.04 to a VHDX file:
+#   .\Export-WSLDistro.ps1 -DistroName Ubuntu-24.04 -ExportPath E:\exports\ubuntu_test.vhdx -VHD -Verbose
+# Parameters:
+#   -DistroName
+#     Required. The name of the WSL distribution to export (e.g., "Ubuntu-24.04")
 #
-#   Export Debian to a TAR file with default 10GB estimated size:
-#   .\Export-WSLDistro.ps1 -DistroName Debian -ExportPath D:\backups\debian.tar
+#   -ExportPath
+#     Required. Full path where the exported file will be saved
+#     Must be a valid Windows path starting with drive letter (e.g., "C:\exports\backup.vhdx")
+#     Parent directory must exist
 #
-#   Export Fedora with custom size to TAR:
-#   .\Export-WSLDistro.ps1 -DistroName Fedora -ExportPath C:\wsl\fedora_backup.tar -EstimatedSizeGB 50
+#   -VHD
+#     Optional switch. When specified, exports to VHDX format instead of tar
+#     Recommended for better performance and features like dynamic expansion
+#
+#   -EstimatedSizeGB
+#     Optional. The estimated size in GB for the VHDX file (1-10000 GB)
+#     Only used if the script cannot determine the size of the distribution
+#     Helps pre-allocate appropriate space for the virtual disk
 
 param(
     [Parameter(Mandatory = $true)]
@@ -32,10 +43,42 @@ param(
 
     [Parameter()]
     [ValidateRange(1, 10000)]
-    [long]$EstimatedSizeGB = 10
+    [long]$EstimatedSizeGB
 )
 
 begin {
+    # Add function to get WSL distribution size
+    function Get-WSLDistributionSize {
+        param (
+            [string]$DistroName
+        )
+        
+        try {
+            # Get the WSL installation path
+            $wslPath = (Get-ChildItem "HKCU:\Software\Microsoft\Windows\CurrentVersion\Lxss" | 
+                       Get-ItemProperty | 
+                       Where-Object { $_.DistributionName -eq $DistroName }).BasePath
+
+            if (-not $wslPath) {
+                throw "Could not find WSL path for distribution $DistroName"
+            }
+
+            # Get the size of the ext4.vhdx file
+            $vhdxPath = Join-Path $wslPath "ext4.vhdx"
+            if (Test-Path $vhdxPath) {
+                $sizeBytes = (Get-Item $vhdxPath).Length
+                return [math]::Ceiling($sizeBytes / 1GB)
+            }
+            
+            # If we can't find the VHDX, return a default size
+            return 256
+        }
+        catch {
+            Write-Warning "Could not determine WSL distribution size: $_"
+            return 256  # Default to 256GB if we can't determine the size
+        }
+    }
+
     Write-Host ""
     Write-Warning "It is recommended to shut down your WSL distribution before exporting with wsl.exe --shutdown"
     Write-Host ""
@@ -44,6 +87,12 @@ begin {
     Write-Host "Press Ctrl+C within 5 seconds to cancel..." -ForegroundColor Yellow
     Write-Host ""
     Start-Sleep -Seconds 5
+
+    # If no size was specified, calculate it
+    if (-not $EstimatedSizeGB) {
+        $EstimatedSizeGB = Get-WSLDistributionSize -DistroName $DistroName
+        Write-Host "Automatically determined size: $EstimatedSizeGB GB" -ForegroundColor Green
+    }
 
     Write-Host "Shutting down WSL..." -ForegroundColor Yellow
     wsl.exe --shutdown
