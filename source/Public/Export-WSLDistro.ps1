@@ -25,6 +25,25 @@ param(
 )
 
 begin {
+    Write-Host ""
+    Write-Warning "It is recommended to shut down your WSL distribution before exporting with wsl.exe --shutdown"
+    Write-Host ""
+    Start-Sleep -Seconds 1
+    Write-Warning "This will export your WSL distribution. The process cannot be interrupted once started."
+    Write-Host "Press Ctrl+C within 5 seconds to cancel..." -ForegroundColor Yellow
+    Write-Host ""
+    Start-Sleep -Seconds 5
+
+    Write-Host "Shutting down WSL..." -ForegroundColor Yellow
+    wsl.exe --shutdown
+    wsl.exe --terminate $DistroName
+    Write-Host "WSL shutdown complete." -ForegroundColor Green
+    Write-Host ""
+
+    Write-Host "Starting export..." -ForegroundColor Green
+    Write-Host ""
+    Write-Host "Do not interrupt the process until it is complete. If you do, restart the wslservice.exe process to interract with your WSL distribution." -ForegroundColor Yellow
+    Write-Host ""
     # Progress display helper
     function Write-ExportProgress {
         param(
