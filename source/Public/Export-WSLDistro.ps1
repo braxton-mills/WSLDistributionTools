@@ -1,3 +1,14 @@
+# Command to export a WSL distribution to a VHDX file
+#
+# Examples:
+#   Export Ubuntu 24.04 to a VHDX file with 256GB estimated size:
+#   .\Export-WSLDistro.ps1 -DistroName Ubuntu-24.04 -ExportPath E:\exports\ubuntu_test.vhdx -VHD -EstimatedSizeGB 256 -Verbose
+#
+#   Export Debian to a TAR file with default 10GB estimated size:
+#   .\Export-WSLDistro.ps1 -DistroName Debian -ExportPath D:\backups\debian.tar
+#
+#   Export Fedora with custom size to TAR:
+#   .\Export-WSLDistro.ps1 -DistroName Fedora -ExportPath C:\wsl\fedora_backup.tar -EstimatedSizeGB 50
 
 param(
     [Parameter(Mandatory = $true)]
