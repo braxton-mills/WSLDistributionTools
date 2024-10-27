@@ -41,6 +41,17 @@ begin {
             [char]$SpinnerChar
         )
 
+        # Prevent division by zero
+        if ($Elapsed.TotalSeconds -le 0) {
+            return @{
+                ProgressPercent = 0
+                CurrentSize     = 0
+                TotalSize      = [math]::Round($TotalSize / 1GB, 2)
+                SpeedMBps      = 0
+                RemainingTime  = [TimeSpan]::Zero
+            }
+        }
+
         # Calculate speed
         $speed = $CurrentSize / $Elapsed.TotalSeconds
         $speedMBps = [math]::Round($speed / 1MB, 2)
@@ -86,10 +97,22 @@ begin {
             throw "WSL is not installed or not in PATH. Please install WSL first."
         }
 
-        # Validate distribution exists
-        $distros = wsl.exe --list --quiet
-        if ($distros -notmatch "^$DistroName$") {
-            $availableDistros = $distros | Where-Object { $_ -and $_.Trim() } | ForEach-Object { "- $_" }
+        # Improved distribution validation
+        $distros = (wsl.exe --list --quiet) -split "`n" | 
+                  Where-Object { $_ } | 
+                  ForEach-Object { $_.Trim() } |
+                  Where-Object { $_ -ne "" }
+
+        $distroExists = $false
+        foreach ($distro in $distros) {
+            if ($distro.Trim() -eq $DistroName) {
+                $distroExists = $true
+                break
+            }
+        }
+
+        if (-not $distroExists) {
+            $availableDistros = $distros | ForEach-Object { "- $_" }
             throw "Distribution '$DistroName' not found. Available distributions:`n$($availableDistros -join "`n")"
         }
 
@@ -139,7 +162,20 @@ process {
             $exportArgs += "--vhd"
         }
         Write-Verbose "Starting WSL export with arguments: $($exportArgs -join ' ')"
-        $exportProcess = Start-Process wsl.exe -ArgumentList $exportArgs -PassThru
+        
+        # Create process start info with redirected output
+        $psi = New-Object System.Diagnostics.ProcessStartInfo
+        $psi.FileName = "wsl.exe"
+        $psi.Arguments = $exportArgs
+        $psi.RedirectStandardError = $true
+        $psi.RedirectStandardOutput = $true
+        $psi.UseShellExecute = $false
+        $psi.CreateNoWindow = $true
+
+        # Start the process
+        $exportProcess = New-Object System.Diagnostics.Process
+        $exportProcess.StartInfo = $psi
+        $exportProcess.Start() | Out-Null
 
         # Initialize monitoring variables
         $monitoring = $true
@@ -171,20 +207,26 @@ process {
             if ($exportProcess.HasExited) {
                 $monitoring = $false
                 Write-Host "`nExport completed!"
+                
+                # Get any error output
+                $errorOutput = $exportProcess.StandardError.ReadToEnd()
+                $standardOutput = $exportProcess.StandardOutput.ReadToEnd()
 
                 switch ($exportProcess.ExitCode) {
                     0 {
                         Write-Host "Export successful!"
                         $result.Success = $true
                     }
-                    -1 {
-                        throw "Export was interrupted or failed. Please check that the distro exists and try again."
-                    }
-                    1 {
-                        throw "Export failed - general error"
-                    }
                     default {
-                        throw "Export failed with exit code $($exportProcess.ExitCode)"
+                        if ($errorOutput) {
+                            throw "Export failed with error: $errorOutput"
+                        }
+                        elseif ($standardOutput) {
+                            throw "Export failed with output: $standardOutput"
+                        }
+                        else {
+                            throw "Export failed with exit code $($exportProcess.ExitCode)"
+                        }
                     }
                 }
 
@@ -198,6 +240,9 @@ process {
                 }
             }
         }
+
+        # Cleanup
+        $exportProcess.Dispose()
     }
     catch {
         $result.Error = $_.Exception.Message
